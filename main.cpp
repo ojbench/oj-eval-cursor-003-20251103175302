@@ -20,6 +20,7 @@ struct ProblemStatus {
     int wrongAttempts = 0;
     int frozenSubmissions = 0;
     vector<Submission> submissions;
+    vector<Submission> frozenSubs;  // Submissions made during freeze
 };
 
 class Team {
@@ -27,35 +28,49 @@ public:
     string name;
     map<char, ProblemStatus> problems;
     
+    // Cached values for performance
+    mutable int cachedSolved = -1;
+    mutable int cachedPenalty = -1;
+    mutable vector<int> cachedTimes;
+    mutable bool cacheValid = false;
+    
     Team(string n) : name(n) {}
     
-    int getSolvedCount(bool includeFrozen = false) const {
-        int count = 0;
-        for (const auto& p : problems) {
-            if (p.second.solved) count++;
-        }
-        return count;
+    void invalidateCache() const {
+        cacheValid = false;
     }
     
-    int getPenaltyTime(bool includeFrozen = false) const {
-        int penalty = 0;
+    void updateCache() const {
+        if (cacheValid) return;
+        
+        cachedSolved = 0;
+        cachedPenalty = 0;
+        cachedTimes.clear();
+        
         for (const auto& p : problems) {
             if (p.second.solved) {
-                penalty += p.second.solveTime + 20 * p.second.wrongAttempts;
+                cachedSolved++;
+                cachedPenalty += p.second.solveTime + 20 * p.second.wrongAttempts;
+                cachedTimes.push_back(p.second.solveTime);
             }
         }
-        return penalty;
+        sort(cachedTimes.rbegin(), cachedTimes.rend());
+        cacheValid = true;
     }
     
-    vector<int> getSolveTimes(bool includeFrozen = false) const {
-        vector<int> times;
-        for (const auto& p : problems) {
-            if (p.second.solved) {
-                times.push_back(p.second.solveTime);
-            }
-        }
-        sort(times.rbegin(), times.rend());
-        return times;
+    int getSolvedCount() const {
+        updateCache();
+        return cachedSolved;
+    }
+    
+    int getPenaltyTime() const {
+        updateCache();
+        return cachedPenalty;
+    }
+    
+    const vector<int>& getSolveTimes() const {
+        updateCache();
+        return cachedTimes;
     }
 };
 
@@ -81,10 +96,11 @@ private:
         int penalty2 = team2->getPenaltyTime();
         if (penalty1 != penalty2) return penalty1 < penalty2;
         
-        vector<int> times1 = team1->getSolveTimes();
-        vector<int> times2 = team2->getSolveTimes();
+        const vector<int>& times1 = team1->getSolveTimes();
+        const vector<int>& times2 = team2->getSolveTimes();
         
-        for (size_t i = 0; i < min(times1.size(), times2.size()); i++) {
+        size_t minSize = min(times1.size(), times2.size());
+        for (size_t i = 0; i < minSize; i++) {
             if (times1[i] != times2[i]) return times1[i] < times2[i];
         }
         
@@ -153,6 +169,8 @@ public:
             return;
         }
         teams[name] = new Team(name);
+        ranking.push_back(name);
+        sort(ranking.begin(), ranking.end());
         cout << "[Info]Add successfully.\n";
     }
     
@@ -186,12 +204,15 @@ public:
         
         if (frozen && !ps.solved) {
             ps.frozenSubmissions++;
+            ps.frozenSubs.push_back(sub);
         } else if (!ps.solved) {
             if (status == "Accepted") {
                 ps.solved = true;
                 ps.solveTime = time;
+                team->invalidateCache();
             } else {
                 ps.wrongAttempts++;
+                team->invalidateCache();
             }
         }
     }
@@ -236,7 +257,7 @@ public:
                 for (int j = 0; j < problemCount; j++) {
                     char prob = 'A' + j;
                     ProblemStatus& ps = team->problems[prob];
-                    if (!ps.solved && ps.frozenSubmissions > 0) {
+                    if (ps.frozenSubmissions > 0) {
                         smallestFrozen = min(smallestFrozen, prob);
                     }
                 }
@@ -263,33 +284,37 @@ public:
                 }
             }
             
-            // Process frozen submissions
-            bool wasSolved = ps.solved;
-            for (const auto& sub : ps.submissions) {
-                if (frozen && !wasSolved) {
+            // Process frozen submissions for this problem
+            bool changed = false;
+            for (const auto& sub : ps.frozenSubs) {
+                if (!ps.solved) {
                     if (sub.status == "Accepted") {
                         ps.solved = true;
                         ps.solveTime = sub.time;
-                        wasSolved = true;
+                        changed = true;
                     } else {
                         ps.wrongAttempts++;
                     }
                 }
             }
             ps.frozenSubmissions = 0;
+            ps.frozenSubs.clear();
             
-            // Re-rank
-            flushScoreboard();
+            if (!changed) continue;  // No ranking change if not accepted
             
-            int newRank = 0;
-            for (size_t i = 0; i < ranking.size(); i++) {
-                if (ranking[i] == targetTeam) {
-                    newRank = i;
-                    break;
-                }
+            team->invalidateCache();
+            
+            // Find new position by comparing with teams above
+            int newRank = oldRank;
+            while (newRank > 0 && compareTeams(targetTeam, ranking[newRank - 1])) {
+                newRank--;
             }
             
             if (newRank < oldRank) {
+                // Remove from old position and insert at new position
+                ranking.erase(ranking.begin() + oldRank);
+                ranking.insert(ranking.begin() + newRank, targetTeam);
+                
                 cout << targetTeam << " " << ranking[newRank + 1] << " " 
                      << team->getSolvedCount() << " " << team->getPenaltyTime() << "\n";
             }
