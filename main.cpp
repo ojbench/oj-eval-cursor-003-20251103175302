@@ -26,7 +26,7 @@ struct ProblemStatus {
 class Team {
 public:
     string name;
-    map<char, ProblemStatus> problems;
+    vector<ProblemStatus> problems;
     
     // Cached values for performance
     mutable int cachedSolved = -1;
@@ -34,7 +34,7 @@ public:
     mutable vector<int> cachedTimes;
     mutable bool cacheValid = false;
     
-    Team(string n) : name(n) {}
+    Team(string n, int problemCount) : name(n), problems(problemCount) {}
     
     void invalidateCache() const {
         cacheValid = false;
@@ -48,10 +48,10 @@ public:
         cachedTimes.clear();
         
         for (const auto& p : problems) {
-            if (p.second.solved) {
+            if (p.solved) {
                 cachedSolved++;
-                cachedPenalty += p.second.solveTime + 20 * p.second.wrongAttempts;
-                cachedTimes.push_back(p.second.solveTime);
+                cachedPenalty += p.solveTime + 20 * p.wrongAttempts;
+                cachedTimes.push_back(p.solveTime);
             }
         }
         sort(cachedTimes.rbegin(), cachedTimes.rend());
@@ -149,8 +149,7 @@ private:
                  << team->getPenaltyTime();
             
             for (int i = 0; i < problemCount; i++) {
-                char prob = 'A' + i;
-                const ProblemStatus& ps = team->problems[prob];
+                const ProblemStatus& ps = team->problems[i];
                 bool isFrozen = frozen && !ps.solved && ps.frozenSubmissions > 0;
                 cout << " " << getProblemDisplay(ps, isFrozen);
             }
@@ -168,7 +167,7 @@ public:
             cout << "[Error]Add failed: duplicated team name.\n";
             return;
         }
-        teams[name] = new Team(name);
+        teams[name] = new Team(name, 26);  // Max 26 problems
         ranking.push_back(name);
         sort(ranking.begin(), ranking.end());
         cout << "[Info]Add successfully.\n";
@@ -183,21 +182,13 @@ public:
         durationTime = duration;
         problemCount = problems;
         
-        // Initialize problem structures for all teams
-        for (auto& p : teams) {
-            for (int i = 0; i < problemCount; i++) {
-                char prob = 'A' + i;
-                p.second->problems[prob] = ProblemStatus();
-            }
-        }
-        
         cout << "[Info]Competition starts.\n";
     }
     
     void submit(const string& problem, const string& teamName, const string& status, int time) {
         Team* team = teams[teamName];
-        char prob = problem[0];
-        ProblemStatus& ps = team->problems[prob];
+        int probIdx = problem[0] - 'A';
+        ProblemStatus& ps = team->problems[probIdx];
         
         Submission sub = {problem, status, time};
         ps.submissions.push_back(sub);
@@ -252,19 +243,19 @@ public:
             // Find lowest-ranked team with frozen problems
             for (int i = ranking.size() - 1; i >= 0; i--) {
                 Team* team = teams[ranking[i]];
-                char smallestFrozen = 'Z' + 1;
+                int smallestFrozen = -1;
                 
                 for (int j = 0; j < problemCount; j++) {
-                    char prob = 'A' + j;
-                    ProblemStatus& ps = team->problems[prob];
+                    ProblemStatus& ps = team->problems[j];
                     if (ps.frozenSubmissions > 0) {
-                        smallestFrozen = min(smallestFrozen, prob);
+                        if (smallestFrozen == -1) smallestFrozen = j;
+                        break;
                     }
                 }
                 
-                if (smallestFrozen <= 'Z') {
+                if (smallestFrozen != -1) {
                     targetTeam = ranking[i];
-                    targetProblem = smallestFrozen;
+                    targetProblem = 'A' + smallestFrozen;
                     found = true;
                     break;
                 }
@@ -274,7 +265,8 @@ public:
             
             // Unfreeze the problem
             Team* team = teams[targetTeam];
-            ProblemStatus& ps = team->problems[targetProblem];
+            int probIdx = targetProblem - 'A';
+            ProblemStatus& ps = team->problems[probIdx];
             
             int oldRank = 0;
             for (size_t i = 0; i < ranking.size(); i++) {
@@ -358,7 +350,7 @@ public:
         Submission* lastMatch = nullptr;
         
         for (auto& p : team->problems) {
-            for (auto& sub : p.second.submissions) {
+            for (auto& sub : p.submissions) {
                 bool problemMatch = (problem == "ALL" || sub.problem == problem);
                 bool statusMatch = (status == "ALL" || sub.status == status);
                 
