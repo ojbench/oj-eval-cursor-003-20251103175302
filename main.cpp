@@ -83,6 +83,7 @@ private:
     int durationTime = 0;
     int problemCount = 0;
     vector<string> ranking;
+    map<string, int> teamRank;  // Cache team ranks for O(1) lookup
     
     bool compareTeams(const string& t1Name, const string& t2Name) {
         Team* team1 = teams[t1Name];
@@ -109,12 +110,16 @@ private:
     
     void flushScoreboard() {
         ranking.clear();
+        teamRank.clear();
         for (auto& p : teams) {
             ranking.push_back(p.first);
         }
         sort(ranking.begin(), ranking.end(), [this](const string& a, const string& b) {
             return compareTeams(a, b);
         });
+        for (size_t i = 0; i < ranking.size(); i++) {
+            teamRank[ranking[i]] = i;
+        }
     }
     
     string getProblemDisplay(const ProblemStatus& ps, bool isFrozen) {
@@ -136,13 +141,7 @@ private:
     void printScoreboard() {
         for (const string& teamName : ranking) {
             Team* team = teams[teamName];
-            int rank = 0;
-            for (size_t i = 0; i < ranking.size(); i++) {
-                if (ranking[i] == teamName) {
-                    rank = i + 1;
-                    break;
-                }
-            }
+            int rank = teamRank[teamName] + 1;
             
             cout << teamName << " " << rank << " " 
                  << team->getSolvedCount() << " " 
@@ -170,6 +169,10 @@ public:
         teams[name] = new Team(name, 26);  // Max 26 problems
         ranking.push_back(name);
         sort(ranking.begin(), ranking.end());
+        // Update teamRank
+        for (size_t i = 0; i < ranking.size(); i++) {
+            teamRank[ranking[i]] = i;
+        }
         cout << "[Info]Add successfully.\n";
     }
     
@@ -268,13 +271,7 @@ public:
             int probIdx = targetProblem - 'A';
             ProblemStatus& ps = team->problems[probIdx];
             
-            int oldRank = 0;
-            for (size_t i = 0; i < ranking.size(); i++) {
-                if (ranking[i] == targetTeam) {
-                    oldRank = i;
-                    break;
-                }
-            }
+            int oldRank = teamRank[targetTeam];
             
             // Process frozen submissions for this problem
             bool changed = false;
@@ -307,6 +304,11 @@ public:
                 ranking.erase(ranking.begin() + oldRank);
                 ranking.insert(ranking.begin() + newRank, targetTeam);
                 
+                // Update teamRank map for affected teams
+                for (int i = newRank; i <= oldRank; i++) {
+                    teamRank[ranking[i]] = i;
+                }
+                
                 cout << targetTeam << " " << ranking[newRank + 1] << " " 
                      << team->getSolvedCount() << " " << team->getPenaltyTime() << "\n";
             }
@@ -327,13 +329,7 @@ public:
             cout << "[Warning]Scoreboard is frozen. The ranking may be inaccurate until it were scrolled.\n";
         }
         
-        int rank = 0;
-        for (size_t i = 0; i < ranking.size(); i++) {
-            if (ranking[i] == teamName) {
-                rank = i + 1;
-                break;
-            }
-        }
+        int rank = teamRank[teamName] + 1;
         
         cout << teamName << " NOW AT RANKING " << rank << "\n";
     }
